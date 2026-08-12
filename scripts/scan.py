@@ -366,6 +366,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .btn.warn{background:#f85149;border-color:#f85149;color:#fff}
   .btn.warn:hover{border-color:#ff7b72}
   .cnt{margin-left:auto;color:var(--dim);font-size:12px;font-family:var(--mono);white-space:nowrap}
+  .banner{display:flex;align-items:center;gap:8px;background:rgba(210,153,34,.12);border:1px solid rgba(210,153,34,.45);color:var(--warn);border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:14px;line-height:1.5}
+  .banner[hidden]{display:none}
+  .banner code{color:var(--fg);background:#0d1117;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:var(--mono)}
+  .banner b{color:var(--acc)}
 </style>
 </head>
 <body>
@@ -384,6 +388,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="lbl">磁盘占用 TOP（按项目）</div>
     <div id="sizeBars"></div>
   </div>
+
+  <div class="banner" id="roBanner" hidden>🔌 当前是只读模式（file:// 打开）：『打开终端 / 删除』按钮不可用。
+    请运行 <code>py -X utf8 scripts/server.py</code> 后访问 <b>http://localhost:8123/</b></div>
 
   <div class="toolbar">
     <input type="search" id="q" placeholder="🔍 关键词搜索，空格分隔多个词（如：星露谷 攻略）" autocomplete="off">
@@ -412,7 +419,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </table>
   <div class="empty" id="empty" style="display:none">没有匹配的会话</div>
 
-  <footer>HelloXW 出品 · 网页只读 · 起 <code>scripts/server.py</code> 后『打开/删除』按钮生效，删除进回收站可恢复</footer>
+  <footer>HelloXW 出品 · 起 <code>scripts/server.py</code> 后访问 http://localhost:8123/ 才能『打开终端 / 删除』，删除进回收站可恢复</footer>
 
   <div id="delModal" class="modal" hidden>
     <div class="modal-box">
@@ -430,6 +437,7 @@ const DATA = __DATA__;
 let cur=[], f='all', q='', sortK='time', sortAsc=false, deep=false;
 let rowsCache=[]; // 操作按钮 data-idx -> session 对象（绝不把路径嵌进 HTML 属性，防引号转义坑）
 const isHttp=location.protocol.startsWith('http'); // http 服务模式 vs file:// 静态模式
+if(!isHttp)document.getElementById('roBanner').hidden=false; // file:// 只读模式：提示起服务
 
 const fmtSize=n=>{for(const u of ['B','KB','MB','GB']){if(n<1024)return (u==='B'?n:n/1).toFixed(0)+u;n/=1024}return n.toFixed(1)+'TB'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -536,7 +544,7 @@ function renderRows(list){
       +`<td style="font-family:var(--mono)">${fmtSize(s.size)}</td>`
       +`<td><span class="cmd" data-copy="${esc(cmd)}" title="点击复制">${esc(cmd)}</span></td>`
       +`<td><div class="path" data-copy="${esc(s.path)}" title="${esc(s.path)}">${hl(esc(s.path))}</div></td>`
-      +`<td class="ops"><button class="op" data-act="open" data-idx="${idx}" title="打开项目目录">📂</button><button class="op del" data-act="del" data-idx="${idx}" title="删除会话（进回收站）">🗑</button></td>`;
+      +`<td class="ops"><button class="op" data-act="open" data-idx="${idx}" title="在项目目录打开终端">📂</button><button class="op del" data-act="del" data-idx="${idx}" title="删除会话（进回收站）">🗑</button></td>`;
     tb.appendChild(tr);
   }
 }
@@ -557,15 +565,16 @@ function renderBars(){
 document.getElementById('q').addEventListener('input',e=>{q=e.target.value.trim();apply();});
 // 事件委托：点任何带 data-copy 的元素就复制，避开内联 onclick 的引号转义坑
 document.addEventListener('click',e=>{const el=e.target.closest('[data-copy]');if(el)copyText(el.getAttribute('data-copy'));});
-// 打开 / 删除按钮：http 服务模式走后端 API；file:// 静态模式降级
+// 打开 / 删除按钮：http 服务模式走后端 API；file:// 静态模式降级为复制命令
 function doOpen(s){
   if(!s.cwd){toast('该会话没有项目目录');return;}
   if(isHttp){
     fetch('/api/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:s.cwd})})
       .then(r=>r.json()).then(j=>toast(j.msg)).catch(()=>toast('请求失败：服务没起？'));
   }else{
-    window.open('file:///'+String(s.cwd).replace(/\\/g,'/').replace(/#/g,'%23'),'_blank');
-    toast('已尝试打开（file:// 下可能被浏览器拦截）');
+    // file:// 下浏览器不能弹终端，降级为复制进入目录的命令，起服务后才是真打开
+    copyText('cd /d "'+s.cwd+'"');
+    toast('只读模式：已复制进入该目录的命令（起服务后可一键打开终端）');
   }
 }
 let pendingDel=null;

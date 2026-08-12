@@ -10,7 +10,7 @@
     py -X utf8 server.py [端口]     # 默认 8123，Ctrl+C 停止
 
 API:
-    POST /api/open    {"path": "项目目录"}   用资源管理器打开该目录
+    POST /api/open    {"path": "项目目录"}   在项目目录下打开命令窗口（优先 Windows Terminal）
     POST /api/delete  {"path": "会话文件"}   删除会话文件（进回收站，可恢复）
 
 安全设计:
@@ -21,6 +21,7 @@ API:
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -42,6 +43,21 @@ def in_allow_roots(path):
         if rp == rr or rp.startswith(rr + os.sep):
             return True
     return False
+
+
+def open_terminal_at(path):
+    """在项目目录下打开一个命令窗口：优先 Windows Terminal，兜底 cmd 新控制台。
+
+    用户要的是"在项目目录里直接敲 claude --resume 恢复对话"，不是资源管理器。
+    """
+    wt = shutil.which("wt")
+    if wt:
+        subprocess.Popen([wt, "-d", path])
+    else:
+        subprocess.Popen(
+            ["cmd.exe", "/k", "cd", "/d", path],
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10),
+        )
 
 
 def send_to_recycle_bin(path):
@@ -99,8 +115,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send(False, "目录不存在: " + p)
                 return
             try:
-                os.startfile(p)  # Windows 资源管理器打开项目目录
-                self._send(True, "已打开: " + p)
+                open_terminal_at(p)
+                self._send(True, "已在目录打开终端: " + p)
             except Exception as e:
                 self._send(False, "打开失败: %s" % e)
         elif self.path == "/api/delete":

@@ -63,9 +63,11 @@ py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/scan.py" --html
   （不只摘要），命中行摘要下方展开**含关键词的正文片段**（最多 3 段，每段优先从关键词
   位置居中截取 ≤160 字符，关键词同样 `<mark>` 高亮）。搜摘要里没有的词（如正文独有细节）
   时用它，关掉就和原来一模一样。
-- **📂 打开 / 🗑 删除按钮**（每行操作列）：file:// 双击打开网页时只读，删除按钮降级为
-  一键复制删除命令；**起 `scripts/server.py` 后**（见下节），打开按钮用资源管理器打开该
-  会话的项目目录，删除按钮弹确认框 → 真删该会话文件（进回收站，可恢复）。
+- **📂 打开 / 🗑 删除按钮**（每行操作列）：file:// 双击打开网页时是**只读模式**（页面顶部
+  出现橙色提示条），打开/删除按钮降级为一键复制命令（打开复制 `cd /d "目录"`、删除复制
+  回收站命令）；**起 `scripts/server.py` 后**（见下节），打开按钮在**项目目录下打开命令
+  窗口**（优先 Windows Terminal，兜底 cmd，方便直接敲 `claude --resume` 恢复对话），
+  删除按钮弹确认框 → 真删该会话文件（进回收站，可恢复）。
 
 恢复会话 = 复制网页里那行"恢复命令"到终端跑：
 - Claude Code: `claude --resume <sid>`
@@ -81,7 +83,7 @@ py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/server.py"   # 默认
 ```
 
 然后浏览器访问 `http://localhost:8123/`（自动跳到 session_index.html）：
-- **📂 打开** → `POST /api/open`，用资源管理器打开该会话的项目目录
+- **📂 打开** → `POST /api/open`，在项目目录下打开命令窗口（优先 Windows Terminal，兜底 cmd）
 - **🗑 删除** → 弹确认框（显示摘要/路径/大小）→ `POST /api/delete`，把会话文件删进回收站
 
 安全设计（别乱改）：

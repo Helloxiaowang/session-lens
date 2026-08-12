@@ -76,7 +76,9 @@ py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/scan.py" --html
 ## 打开/删除按钮（需要本地服务）
 
 网页里每行末尾的 **📂 打开 / 🗑 删除** 按钮，纯 file:// 双击打开时浏览器限制不能碰本地文件，
-删除只降级为复制命令。想让按钮真生效，起本地服务：
+删除只降级为复制命令。想让按钮真生效，起本地服务。最省事的是**双击 exe**（`dist/SessionLens.exe`，
+`py -m PyInstaller --onefile --name SessionLens --paths scripts launcher.py` 打包）：自动重扫会话 →
+起服务 → 开浏览器，弹出的控制台窗口关掉即停服务。想手动起服务也行：
 
 ```bash
 py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/server.py"   # 默认端口 8123

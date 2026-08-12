@@ -3,7 +3,7 @@
 **跨平台会话索引器** —— 把 Claude Code 和 Codex 的所有历史会话，扫进一个可搜索的 HTML 面板。
 解决换 API 平台后 `/resume` 找不到记录、忘了哪个项目聊过什么、忘了清理占内存会话的问题。
 
-> HelloXW 出品 · 起 `scripts/server.py` 后访问 http://localhost:8123/ 才能『打开终端 / 删除』，删除进回收站可恢复
+> HelloXW 出品 · 双击 `dist/SessionLens.exe` 一条龙（重扫 + 起服务 + 开浏览器），『打开终端 / 删除』按钮可用，删除进回收站可恢复
 
 ## 功能
 
@@ -13,6 +13,26 @@
 - **🔍 详细模式**：在全部会话正文里搜（不只摘要），命中行展开含关键词的正文片段
 - **📂 打开 / 🗑 删除按钮**：每行操作列，起本地服务后在项目目录打开命令窗口 / 删除会话（进回收站）；file:// 双击打开为只读模式，按钮降级为复制命令
 - **只读不删**：默认只统计不删除，删除是用户主动操作且进回收站可恢复（防止误删）
+
+## 一键 exe（不用记命令）
+
+不想记"先 `scan.py --html` 再 `server.py` 再手动开浏览器"那一堆？直接双击 `dist/SessionLens.exe`：
+
+- **首次双击**：自动重扫 Claude + Codex 全部会话 → 起本地服务（127.0.0.1:8123）→ 自动弹出浏览器索引页
+- **再双击**：检测到服务已在跑，只打开浏览器，不重复起服务
+- **弹出的控制台窗口 = 服务开关**：关闭窗口即停止服务
+- exe 模式下网页『📂 打开终端 / 🗑 删除』按钮直接可用（删除进回收站可恢复）
+
+本地自己打包（需要 Python + PyInstaller）：
+
+```bash
+py -m pip install pyinstaller
+cd 本仓库根目录
+py -m PyInstaller --onefile --name SessionLens --paths scripts launcher.py
+```
+
+产物 `dist/SessionLens.exe`（约 9MB，单文件免依赖，拷哪都能跑）。
+开发/调试直接跑源码：`py -X utf8 launcher.py`（行为跟 exe 一模一样）。
 
 ## 安装
 

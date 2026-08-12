@@ -4,3 +4,8 @@ session_index.html
 # Python 缓存
 __pycache__/
 *.pyc
+
+# PyInstaller 打包产物（本地打 exe 用，不入库）
+build/
+dist/
+*.spec

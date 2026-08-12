@@ -352,6 +352,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .snip{margin-top:8px;border-left:2px solid var(--acc);padding-left:8px;display:flex;flex-direction:column;gap:4px}
   .snip-it{color:var(--dim);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
   .snip-it mark{background:var(--warn);color:#0d1117;border-radius:3px;padding:0 2px}
+  .ops{width:76px;text-align:center;white-space:nowrap}
+  .op{background:transparent;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:2px 7px;margin:0 2px;cursor:pointer;font-size:13px;line-height:1.4}
+  .op:hover{border-color:var(--acc);color:var(--fg)}
+  .op.del:hover{border-color:#f85149;color:#f85149}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100}
+  .modal[hidden]{display:none}
+  .modal-box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 22px;max-width:540px;width:92%;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .modal-box h3{margin:0 0 10px;font-size:15px}
+  .del-info{color:var(--dim);font-size:13px;line-height:1.6;word-break:break-all;margin-bottom:14px}
+  .del-info .path{color:var(--acc);font-family:var(--mono);font-size:12px;white-space:normal;max-width:none}
+  .modal-ops{display:flex;justify-content:flex-end;gap:8px}
+  .btn.warn{background:#f85149;border-color:#f85149;color:#fff}
+  .btn.warn:hover{border-color:#ff7b72}
   .cnt{margin-left:auto;color:var(--dim);font-size:12px;font-family:var(--mono);white-space:nowrap}
 </style>
 </head>
@@ -392,17 +405,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <th data-k="size">大小 <span class="arr">↕</span></th>
         <th>恢复命令</th>
         <th>完整路径</th>
+        <th>操作</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
   </table>
   <div class="empty" id="empty" style="display:none">没有匹配的会话</div>
 
-  <footer>HelloXW 出品 · 只统计不删除 · 手动删会话自己动手</footer>
+  <footer>HelloXW 出品 · 网页只读 · 起 <code>scripts/server.py</code> 后『打开/删除』按钮生效，删除进回收站可恢复</footer>
+
+  <div id="delModal" class="modal" hidden>
+    <div class="modal-box">
+      <h3>🗑 确认删除这个会话？</h3>
+      <div class="del-info" id="delInfo"></div>
+      <div class="modal-ops">
+        <button class="btn" id="delCancel">取消</button>
+        <button class="btn warn" id="delOk">删除（进回收站）</button>
+      </div>
+    </div>
+  </div>
 </div>
 <script>
 const DATA = __DATA__;
 let cur=[], f='all', q='', sortK='time', sortAsc=false, deep=false;
+let rowsCache=[]; // 操作按钮 data-idx -> session 对象（绝不把路径嵌进 HTML 属性，防引号转义坑）
+const isHttp=location.protocol.startsWith('http'); // http 服务模式 vs file:// 静态模式
 
 const fmtSize=n=>{for(const u of ['B','KB','MB','GB']){if(n<1024)return (u==='B'?n:n/1).toFixed(0)+u;n/=1024}return n.toFixed(1)+'TB'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -492,8 +519,11 @@ function cmdOf(s){
 }
 function renderRows(list){
   const tb=document.getElementById('rows');tb.innerHTML='';
+  rowsCache=[];
   document.getElementById('empty').style.display=list.length?'none':'block';
   for(const s of list){
+    const idx=rowsCache.length;
+    rowsCache.push(s);
     const tr=document.createElement('tr');
     const t=s.time?new Date(s.time):null;
     const tstr=t?`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`:'--';
@@ -505,7 +535,8 @@ function renderRows(list){
       +`<td class="sum">${isEmpty?'<span class="badge-empty">'+hl(esc(s.summary))+'</span>':hl(esc(s.summary))}${snippetsOf(s)}</td>`
       +`<td style="font-family:var(--mono)">${fmtSize(s.size)}</td>`
       +`<td><span class="cmd" data-copy="${esc(cmd)}" title="点击复制">${esc(cmd)}</span></td>`
-      +`<td><div class="path" data-copy="${esc(s.path)}" title="${esc(s.path)}">${hl(esc(s.path))}</div></td>`;
+      +`<td><div class="path" data-copy="${esc(s.path)}" title="${esc(s.path)}">${hl(esc(s.path))}</div></td>`
+      +`<td class="ops"><button class="op" data-act="open" data-idx="${idx}" title="打开项目目录">📂</button><button class="op del" data-act="del" data-idx="${idx}" title="删除会话（进回收站）">🗑</button></td>`;
     tb.appendChild(tr);
   }
 }
@@ -526,6 +557,60 @@ function renderBars(){
 document.getElementById('q').addEventListener('input',e=>{q=e.target.value.trim();apply();});
 // 事件委托：点任何带 data-copy 的元素就复制，避开内联 onclick 的引号转义坑
 document.addEventListener('click',e=>{const el=e.target.closest('[data-copy]');if(el)copyText(el.getAttribute('data-copy'));});
+// 打开 / 删除按钮：http 服务模式走后端 API；file:// 静态模式降级
+function doOpen(s){
+  if(!s.cwd){toast('该会话没有项目目录');return;}
+  if(isHttp){
+    fetch('/api/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:s.cwd})})
+      .then(r=>r.json()).then(j=>toast(j.msg)).catch(()=>toast('请求失败：服务没起？'));
+  }else{
+    window.open('file:///'+String(s.cwd).replace(/\\/g,'/').replace(/#/g,'%23'),'_blank');
+    toast('已尝试打开（file:// 下可能被浏览器拦截）');
+  }
+}
+let pendingDel=null;
+function delCmd(s){
+  // 静态模式降级：生成进回收站的 PowerShell 命令，复制给用户自己跑
+  const p=String(s.path).replace(/'/g,"''");
+  return "powershell -NoProfile -Command \"Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('"+p+"', 'OnlyErrorDialogs', 'SendToRecycleBin')\"";
+}
+function doDel(s){
+  if(!s.path){toast('没有可删除的会话文件');return;}
+  if(isHttp){
+    pendingDel=s;
+    document.getElementById('delInfo').innerHTML=
+      '<div><span class="tag '+(s.platform==='claude'?'c':'x')+'">'+(s.platform==='claude'?'C':'X')+'</span> '+esc(s.summary||'(无摘要)')+'</div>'
+      +'<div class="path">'+esc(s.path)+'</div>'
+      +'<div class="rel">'+fmtSize(s.size)+' · '+esc(rel(s.time)||'--')+'</div>';
+    document.getElementById('delModal').hidden=false;
+  }else{
+    copyText(delCmd(s));
+    toast('已复制删除命令，粘贴到终端执行（进回收站）');
+  }
+}
+// 操作按钮事件委托（data-idx -> rowsCache，不内联路径，防属性转义坑）
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]');
+  if(!b)return;
+  const s=rowsCache[+b.dataset.idx];
+  if(!s)return;
+  if(b.dataset.act==='open')doOpen(s);
+  else if(b.dataset.act==='del')doDel(s);
+});
+document.getElementById('delCancel').addEventListener('click',()=>{pendingDel=null;document.getElementById('delModal').hidden=true;});
+document.getElementById('delOk').addEventListener('click',()=>{
+  const s=pendingDel;pendingDel=null;
+  document.getElementById('delModal').hidden=true;
+  if(!s)return;
+  fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:s.path})})
+    .then(r=>r.json()).then(j=>{
+      if(j.ok){DATA.sessions=DATA.sessions.filter(x=>x!==s);apply();toast(j.msg);}
+      else toast(j.msg);
+    }).catch(()=>toast('请求失败：服务没起？'));
+});
+document.getElementById('delModal').addEventListener('click',e=>{
+  if(e.target.id==='delModal'){pendingDel=null;document.getElementById('delModal').hidden=true;}
+});
 document.querySelectorAll('.toolbar .btn:not(.deep)').forEach(b=>b.addEventListener('click',()=>{
   document.querySelectorAll('.toolbar .btn:not(.deep)').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');f=b.dataset.f;apply();

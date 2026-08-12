@@ -63,10 +63,32 @@ py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/scan.py" --html
   （不只摘要），命中行摘要下方展开**含关键词的正文片段**（最多 3 段，每段优先从关键词
   位置居中截取 ≤160 字符，关键词同样 `<mark>` 高亮）。搜摘要里没有的词（如正文独有细节）
   时用它，关掉就和原来一模一样。
+- **📂 打开 / 🗑 删除按钮**（每行操作列）：file:// 双击打开网页时只读，删除按钮降级为
+  一键复制删除命令；**起 `scripts/server.py` 后**（见下节），打开按钮用资源管理器打开该
+  会话的项目目录，删除按钮弹确认框 → 真删该会话文件（进回收站，可恢复）。
 
 恢复会话 = 复制网页里那行"恢复命令"到终端跑：
 - Claude Code: `claude --resume <sid>`
 - Codex: `codex resume <sid>`（无 sid 时退化为 `codex resume "<完整路径>"`）
+
+## 打开/删除按钮（需要本地服务）
+
+网页里每行末尾的 **📂 打开 / 🗑 删除** 按钮，纯 file:// 双击打开时浏览器限制不能碰本地文件，
+删除只降级为复制命令。想让按钮真生效，起本地服务：
+
+```bash
+py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/server.py"   # 默认端口 8123
+```
+
+然后浏览器访问 `http://localhost:8123/`（自动跳到 session_index.html）：
+- **📂 打开** → `POST /api/open`，用资源管理器打开该会话的项目目录
+- **🗑 删除** → 弹确认框（显示摘要/路径/大小）→ `POST /api/delete`，把会话文件删进回收站
+
+安全设计（别乱改）：
+- 服务只监听 `127.0.0.1`，只有本机能访问
+- 删除白名单 = `~/.claude/projects` 和 `~/.codex/sessions` 下的 `.jsonl`（realpath 前缀校验，
+  防任意路径删除），白名单外一律拒绝
+- 删除走 Windows 回收站（PowerShell + Microsoft.VisualBasic，零第三方依赖），可恢复
 
 ## 在对话里怎么用
 
@@ -99,3 +121,5 @@ py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/scan.py" --html
 - **详细模式会内嵌全部正文**（`body` 字段）进 `__DATA__`，HTML 会到几 MB 属正常。
   内嵌 JSON 必须 `.replace("<", "\\u003c")`——否则正文里出现 `</script>` 会提前截断 script 标签。
 - `matchSession` 里 haystack 变量要用 `let`（详细模式开启时 `hay += body`），`const` 会重赋值报错。
+- 操作按钮别把路径嵌进 HTML 属性（引号转义坑）——用 `data-idx` 索引 → `rowsCache` 数组映射
+  session 对象，事件委托统一处理。删除走确认 modal（#delModal），成功后 `DATA.sessions.filter(x=>x!==s)` + `apply()` 即时刷新。

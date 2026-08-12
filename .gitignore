@@ -1,0 +1,6 @@
+# 生成物，不入库 —— 跑 scan.py --html 会重新生成
+session_index.html
+
+# Python 缓存
+__pycache__/
+*.pyc

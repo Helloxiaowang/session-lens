@@ -544,7 +544,7 @@ function renderRows(list){
       +`<td style="font-family:var(--mono)">${fmtSize(s.size)}</td>`
       +`<td><span class="cmd" data-copy="${esc(cmd)}" title="点击复制">${esc(cmd)}</span></td>`
       +`<td><div class="path" data-copy="${esc(s.path)}" title="${esc(s.path)}">${hl(esc(s.path))}</div></td>`
-      +`<td class="ops"><button class="op" data-act="open" data-idx="${idx}" title="在项目目录打开终端">📂</button><button class="op del" data-act="del" data-idx="${idx}" title="删除会话（进回收站）">🗑</button></td>`;
+      +`<td class="ops"><button class="op" data-act="open" data-idx="${idx}" title="打开终端并恢复对话">📂</button><button class="op del" data-act="del" data-idx="${idx}" title="删除会话（进回收站）">🗑</button></td>`;
     tb.appendChild(tr);
   }
 }
@@ -569,12 +569,13 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-copy]');i
 function doOpen(s){
   if(!s.cwd){toast('该会话没有项目目录');return;}
   if(isHttp){
-    fetch('/api/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:s.cwd})})
+    fetch('/api/open',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:s.cwd,sid:s.sid,platform:s.platform})})
       .then(r=>r.json()).then(j=>toast(j.msg)).catch(()=>toast('请求失败：服务没起？'));
   }else{
-    // file:// 下浏览器不能弹终端，降级为复制进入目录的命令，起服务后才是真打开
-    copyText('cd /d "'+s.cwd+'"');
-    toast('只读模式：已复制进入该目录的命令（起服务后可一键打开终端）');
+    // file:// 下浏览器不能弹终端，降级为复制恢复命令，起服务后才是真打开
+    copyText(cmdOf(s));
+    toast('只读模式：已复制恢复命令，粘贴到终端运行即可进入对话');
   }
 }
 let pendingDel=null;

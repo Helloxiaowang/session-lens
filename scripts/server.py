@@ -10,15 +10,18 @@
     py -X utf8 server.py [端口]     # 默认 8123，Ctrl+C 停止
 
 API:
-    POST /api/open    {"path": "项目目录"}   在项目目录下打开命令窗口（优先 Windows Terminal）
+    POST /api/open    {"path": 项目目录, "sid": 会话ID, "platform": claude|codex}
+                      在项目目录打开命令窗口并自动恢复对应对话
     POST /api/delete  {"path": "会话文件"}   删除会话文件（进回收站，可恢复）
 
 安全设计:
     - 只监听 127.0.0.1，只有本机能访问
     - 删除只允许 ~/.claude/projects 和 ~/.codex/sessions 下的 .jsonl（白名单校验，
       防任意路径删除）
+    - 恢复命令由后端按 platform+sid 生成，不接受前端传任意命令
     - 删除进回收站（PowerShell + Microsoft.VisualBasic，零第三方依赖），可恢复
 """
+import base64
 import json
 import os
 import shutil
@@ -45,17 +48,34 @@ def in_allow_roots(path):
     return False
 
 
-def open_terminal_at(path):
-    """在项目目录下打开一个命令窗口：优先 Windows Terminal，兜底 cmd 新控制台。
+def resume_command(platform, sid):
+    """按平台生成恢复对话的命令。后端白名单：只认 claude/codex，不接受前端传任意命令。
 
-    用户要的是"在项目目录里直接敲 claude --resume 恢复对话"，不是资源管理器。
+    claude: claude --resume <sid>
+    codex:  codex resume <sid>（无 sid 退化为 codex resume，进交互式选择）
     """
+    sid = str(sid or "").strip().strip('"')
+    if platform == "codex":
+        return 'codex resume "%s"' % sid if sid else "codex resume"
+    return 'claude --resume "%s"' % sid if sid else "claude --resume"
+
+
+def open_terminal_at(path, platform, sid):
+    """在项目目录打开命令窗口，并自动跑恢复命令进入对应对话。
+
+    用 PowerShell -EncodedCommand（base64 UTF-16LE）把『切目录 + 恢复命令』打包传过去：
+    - 完全绕开命令行引号/空格/中文编码的解析坑（路径里有中文或空格都没事）
+    - -NoExit 让窗口在对话退出后仍保留，用户能看清结果
+    优先 Windows Terminal，兜底 PowerShell 新控制台。
+    """
+    ps = 'Set-Location -LiteralPath "%s"; %s' % (path, resume_command(platform, sid))
+    enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
     wt = shutil.which("wt")
     if wt:
-        subprocess.Popen([wt, "-d", path])
+        subprocess.Popen([wt, "-d", path, "powershell.exe", "-NoExit", "-EncodedCommand", enc])
     else:
         subprocess.Popen(
-            ["cmd.exe", "/k", "cd", "/d", path],
+            ["powershell.exe", "-NoExit", "-EncodedCommand", enc],
             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10),
         )
 
@@ -111,12 +131,14 @@ class Handler(SimpleHTTPRequestHandler):
         data = self._read_json()
         if self.path == "/api/open":
             p = data.get("path", "")
+            sid = data.get("sid", "")
+            platform = data.get("platform", "") or "claude"
             if not p or not os.path.isdir(p):
                 self._send(False, "目录不存在: " + p)
                 return
             try:
-                open_terminal_at(p)
-                self._send(True, "已在目录打开终端: " + p)
+                open_terminal_at(p, platform, sid)
+                self._send(True, "已打开终端并恢复对话: " + resume_command(platform, sid))
             except Exception as e:
                 self._send(False, "打开失败: %s" % e)
         elif self.path == "/api/delete":

@@ -71,6 +71,18 @@ def is_meaningful(text):
     return True
 
 
+def collect_body(text_parts):
+    """把会话原始文本抽成可搜索正文：去重 + 过滤垃圾，\n\n 连接。详细模式全文搜索用。"""
+    seen, parts = set(), []
+    for m in text_parts:
+        t = clean_ws(m)
+        if not t or t in seen or not is_meaningful(t):
+            continue
+        seen.add(t)
+        parts.append(t)
+    return "\n\n".join(parts)
+
+
 def pick_summary(msgs):
     """从一堆用户消息里挑出能代表这个会话干了啥的摘要。
     跳过 ping、slash命令、系统注入这类垃圾，取前几条有实质内容的拼接。"""
@@ -139,6 +151,7 @@ def scan_codex():
             last_ts = None   # 文件最后一条带时间戳的行 = 最后一次活动时间
             event_msgs = []      # 干净的，event_msg 里的 user_message
             fallback_msgs = []   # response_item 里的 input_text（可能被污染）
+            text_parts = []      # 全部正文素材（user+assistant），喂给 collect_body 抽可搜索正文
             with open(path, encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     try:
@@ -158,12 +171,17 @@ def scan_codex():
                             m = p.get("message")
                             if m:
                                 event_msgs.append(str(m))
+                                text_parts.append(str(m))
                     elif t == "response_item":
                         p = obj.get("payload", {})
-                        if p.get("type") == "message" and p.get("role") == "user":
+                        if p.get("type") == "message":
+                            role = p.get("role")
                             for c in p.get("content") or []:
-                                if isinstance(c, dict) and c.get("type") == "input_text" and c.get("text"):
-                                    fallback_msgs.append(str(c["text"]))
+                                if isinstance(c, dict) and c.get("type") in ("input_text", "output_text") and c.get("text"):
+                                    txt = str(c["text"])
+                                    text_parts.append(txt)
+                                    if role == "user":
+                                        fallback_msgs.append(txt)
             # event 消息干净就用 event，否则退而求其次用 response_item
             user_msgs = event_msgs if event_msgs else fallback_msgs
             # 去掉重复（同一句可能同时出现在两个来源）
@@ -174,6 +192,7 @@ def scan_codex():
                     seen.add(key)
                     dedup.append(m)
             summary = pick_summary(dedup)
+            body = collect_body(text_parts)
             cwd = meta.get("cwd") or "?"
             sid = meta.get("session_id") or meta.get("id") or ""
             ts = last_ts  # 最后一次活动时间（文件最后一条带时间戳的行）
@@ -186,6 +205,7 @@ def scan_codex():
                 "time": ts,
                 "origin": meta.get("originator") or meta.get("cli_version") or "",
                 "summary": summary,
+                "body": body,
             })
         except Exception:
             continue
@@ -214,6 +234,7 @@ def scan_claude():
                 cwd = None
                 git_branch = None
                 user_msgs = []
+                text_parts = []  # 全部正文素材（user+assistant），喂给 collect_body 抽可搜索正文
                 sid = None
                 last_ts = None   # 文件最后一条带时间戳的行 = 最后一次活动时间
                 with open(path, encoding="utf-8", errors="replace") as fh:
@@ -239,6 +260,14 @@ def scan_claude():
                             text = extract_text(content)
                             if text:
                                 user_msgs.append(text)
+                                text_parts.append(text)
+                        elif t == "assistant":
+                            # assistant 消息的文本块（详细模式全文搜索用）
+                            m = obj.get("message", {})
+                            content = m.get("content") if isinstance(m, dict) else m
+                            text = extract_text(content)
+                            if text:
+                                text_parts.append(text)
                 if not user_msgs:
                     continue
                 summary = pick_summary(user_msgs)
@@ -252,6 +281,7 @@ def scan_claude():
                     "time": ts,
                     "origin": git_branch or "claude",
                     "summary": summary,
+                    "body": collect_body(text_parts),
                 })
             except Exception:
                 continue
@@ -319,6 +349,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .rel{font-size:11px;color:var(--dim)}
   .badge-empty{color:var(--dim);font-style:italic}
   mark{background:var(--warn);color:#0d1117;border-radius:3px;padding:0 2px}
+  .snip{margin-top:8px;border-left:2px solid var(--acc);padding-left:8px;display:flex;flex-direction:column;gap:4px}
+  .snip-it{color:var(--dim);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  .snip-it mark{background:var(--warn);color:#0d1117;border-radius:3px;padding:0 2px}
   .cnt{margin-left:auto;color:var(--dim);font-size:12px;font-family:var(--mono);white-space:nowrap}
 </style>
 </head>
@@ -345,6 +378,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="btn" data-f="claude">Claude</button>
     <button class="btn" data-f="codex">Codex</button>
     <button class="btn" data-f="empty">仅测试</button>
+    <button class="btn deep" id="deepBtn" title="开启后搜索全部会话正文（不再只看摘要），命中时下方展示正文片段">🔍 详细模式</button>
     <span class="cnt" id="cnt"></span>
   </div>
 
@@ -368,7 +402,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <script>
 const DATA = __DATA__;
-let cur=[], f='all', q='', sortK='time', sortAsc=false;
+let cur=[], f='all', q='', sortK='time', sortAsc=false, deep=false;
 
 const fmtSize=n=>{for(const u of ['B','KB','MB','GB']){if(n<1024)return (u==='B'?n:n/1).toFixed(0)+u;n/=1024}return n.toFixed(1)+'TB'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -394,8 +428,35 @@ function hl(t){
 }
 function matchSession(x){
   if(!q)return true;
-  const hay=[x.platform,String(x.cwd),x.summary,String(x.path),x.sid,cmdOf(x)].join(' ').toLowerCase();
+  // 详细模式开启时，搜索 haystack 加上会话全部正文（否则只看摘要/路径等）
+  let hay=[x.platform,String(x.cwd),x.summary,String(x.path),x.sid,cmdOf(x)].join(' ').toLowerCase();
+  if(deep&&x.body)hay+=' '+String(x.body).toLowerCase();
   return q.split(/\s+/).every(w=>hay.includes(w));
+}
+
+// 详细模式命中片段：从正文里挑最多 3 段含关键词的段落，截断后高亮展示
+function snippetsOf(s){
+  if(!deep||!q)return '';
+  const body=String(s.body||'').toLowerCase();
+  if(!body)return '';
+  const words=q.split(/\s+/).filter(Boolean);
+  if(!words.length)return '';
+  const paras=String(s.body).split(/\n+/).filter(p=>p.trim());
+  const hits=[];
+  for(let i=0;i<paras.length&&hits.length<3;i++){
+    if(words.some(w=>paras[i].toLowerCase().includes(w)))hits.push(paras[i]);
+  }
+  if(!hits.length)return '';
+  // 截断时优先从第一个关键词位置附近取，保证关键词在片段内不被切掉
+  const cut=p=>{
+    if(p.length<=160)return p;
+    const w=words.find(x=>p.toLowerCase().includes(x));
+    if(!w)return p.slice(0,160)+'…';
+    const i=p.toLowerCase().indexOf(w.toLowerCase());
+    const start=Math.max(0,i-60);
+    return (start>0?'…':'')+p.slice(start,start+160)+(start+160<p.length?'…':'');
+  };
+  return '<div class="snip">'+hits.map(p=>'<div class="snip-it">'+hl(esc(cut(p)))+'</div>').join('')+'</div>';
 }
 
 function platFilter(){return f==='all'?s=>true:s=>s.platform===(f==='empty'?'__never__':f);}
@@ -441,7 +502,7 @@ function renderRows(list){
     tr.innerHTML=`<td><span class="tag ${s.platform==='claude'?'c':'x'}">${s.platform==='claude'?'C':'X'}</span></td>`
       +`<td title="${esc(tstr)}">${esc(tstr)}<div class="rel">${esc(rel(s.time))}</div></td>`
       +`<td title="${esc(s.cwd)}">${hl(esc(s.cwd))}</td>`
-      +`<td class="sum">${isEmpty?'<span class="badge-empty">'+hl(esc(s.summary))+'</span>':hl(esc(s.summary))}</td>`
+      +`<td class="sum">${isEmpty?'<span class="badge-empty">'+hl(esc(s.summary))+'</span>':hl(esc(s.summary))}${snippetsOf(s)}</td>`
       +`<td style="font-family:var(--mono)">${fmtSize(s.size)}</td>`
       +`<td><span class="cmd" data-copy="${esc(cmd)}" title="点击复制">${esc(cmd)}</span></td>`
       +`<td><div class="path" data-copy="${esc(s.path)}" title="${esc(s.path)}">${hl(esc(s.path))}</div></td>`;
@@ -465,10 +526,16 @@ function renderBars(){
 document.getElementById('q').addEventListener('input',e=>{q=e.target.value.trim();apply();});
 // 事件委托：点任何带 data-copy 的元素就复制，避开内联 onclick 的引号转义坑
 document.addEventListener('click',e=>{const el=e.target.closest('[data-copy]');if(el)copyText(el.getAttribute('data-copy'));});
-document.querySelectorAll('.toolbar .btn').forEach(b=>b.addEventListener('click',()=>{
-  document.querySelectorAll('.toolbar .btn').forEach(x=>x.classList.remove('on'));
+document.querySelectorAll('.toolbar .btn:not(.deep)').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.toolbar .btn:not(.deep)').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');f=b.dataset.f;apply();
 }));
+// 详细模式开关：切换后重新过滤+渲染，开启时按钮高亮
+document.getElementById('deepBtn').addEventListener('click',()=>{
+  deep=!deep;
+  document.getElementById('deepBtn').classList.toggle('on',deep);
+  apply();
+});
 document.querySelectorAll('thead th').forEach(th=>th.addEventListener('click',()=>{
   const k=th.dataset.k;if(!k)return;
   if(sortK===k)sortAsc=!sortAsc;else{sortK=k;sortAsc=false;}
@@ -508,6 +575,7 @@ def build_html(sessions, out_path):
             "sid": s["sid"],
             "time": s["time"].isoformat() if s["time"] else None,
             "summary": s["summary"],
+            "body": s.get("body", ""),
         })
     total = sum(x["size"] for x in data)
     import datetime as _dt
@@ -515,8 +583,9 @@ def build_html(sessions, out_path):
             + f" · 共 {len(data)} 条会话 · {fmt_size(total)}"
             + (f" · {len(records)} 条手动记录" if records else ""))
     payload = {"sessions": data, "records": records}
+    # 内嵌 JSON 必须把 < 转成 <，否则正文里出现 </script> 会提前截断 script 标签
     html = (HTML_TEMPLATE
-            .replace("__DATA__", json.dumps(payload, ensure_ascii=False))
+            .replace("__DATA__", json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c"))
             .replace("__META__", esc_html(meta)))
     os.makedirs(os.path.dirname(out_path), exist_ok=True) if os.path.dirname(out_path) else None
     with open(out_path, "w", encoding="utf-8") as fh:

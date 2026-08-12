@@ -59,6 +59,10 @@ py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/scan.py" --html
 - 筛选按钮：全部 / Claude / Codex / 仅测试；顶部搜索框 = **Everything 式关键词搜索**：
   空格分隔多词 AND 匹配（例：`星露谷 攻略`），命中字段含 平台/cwd/摘要/路径/sid/恢复命令，
   命中词黄色 `<mark>` 高亮，工具栏右侧显示"命中 N / 52 条"；表头可排序。
+- **🔍 详细模式开关**（工具栏右侧）：默认**只看摘要**；点开后在**全部会话正文**里搜
+  （不只摘要），命中行摘要下方展开**含关键词的正文片段**（最多 3 段，每段优先从关键词
+  位置居中截取 ≤160 字符，关键词同样 `<mark>` 高亮）。搜摘要里没有的词（如正文独有细节）
+  时用它，关掉就和原来一模一样。
 
 恢复会话 = 复制网页里那行"恢复命令"到终端跑：
 - Claude Code: `claude --resume <sid>`
@@ -92,3 +96,6 @@ py -X utf8 "C:/Users/w3346/.claude/skills/sessions/scripts/scan.py" --html
 - 不要改脚本的路径常量（写死了 Windows 路径），本机就是 Windows。
 - 生成网页别用内联 onclick 嵌 JSON——双引号直接进 HTML 属性会截断。
   统一用 `data-copy` + document 事件委托。
+- **详细模式会内嵌全部正文**（`body` 字段）进 `__DATA__`，HTML 会到几 MB 属正常。
+  内嵌 JSON 必须 `.replace("<", "\\u003c")`——否则正文里出现 `</script>` 会提前截断 script 标签。
+- `matchSession` 里 haystack 变量要用 `let`（详细模式开启时 `hay += body`），`const` 会重赋值报错。
